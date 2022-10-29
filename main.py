@@ -1,6 +1,9 @@
-from typing import Dict, Tuple, List, Set
+from typing import Dict, Tuple, List, Set, NewType
 import os
 
+t_dtype = NewType('t_dtype', Dict[Tuple[str,str] , float])
+language_corpus = NewType('language_corpus', List[List[str]])
+alignments_dtype = NewType('alignments_dtype', List[List[Tuple[int, int]]])
 
 def read_data(
     training: bool = True,
@@ -41,45 +44,77 @@ def get_vocab(sentences: List[List[str]]) -> Set[str]:
     return vocab
 
 
-def train_iter(E, F, vocab_e, vocab_f, t):
+def train_iter(
+    E: language_corpus, F: language_corpus, 
+    vocab_e: Set[str], vocab_f: Set[str], 
+    t: t_dtype
+    ) -> t_dtype:
+    """
+        This function train one-epoch of EM
+
+        ## parameters
+        - `E`, `F`: List[List[str]] :
+            For E, a list of all English sentences, each member is each sentence,
+            each member of each sentence is each token in that sentence. 
+            For F, the same of foreign sentences
+
+        - `vocab_e`, `vocab_f`: set[str] :
+            For vocab_e, a set of all unique vocab in English.
+            For vocab_f, the same of foreign language
+
+        - `t` : Dict[Tuple[str,str] , float]
+            Our final Foreign-English dictionary
+    """
+    # initialize count and total
     count = dict()
-    total = dict()
+    for sentence_e, sentence_f in zip(E,F):
+        count.update({
+            (e_word, f_word): 0.0 for e_word in sentence_e 
+            for f_word in sentence_f
+        })
 
-    #--- initialize 0 for all e, f
-    for fw in vocab_f:
-        total[fw] = 0.0
-        for ew in vocab_e:
-            count[(ew, fw)] = 0.0
+    total = {f_word: 0.0 for f_word in vocab_f}
 
+    
+    for sentence_e, sentence_f in zip(E,F):
 
-    #--- Expectation
-    s_total = dict()
-    for e, f in zip(E, F):
-        # Compute Normalization
-        for ew in e:
-            s_total[ew] = 0.0
-            for fw in f:
-                s_total[ew] += t[(ew, fw)]
+        # normalization term
+        s_total = dict()
+        for e_word in sentence_e:
+            s_total[e_word] = sum([t[(e_word, f_word)] for f_word in sentence_f])
 
-        # Count
-        for ew in e:
-            for fw in f:
-                count[(ew, fw)] += t[(ew, fw)]/s_total[ew]
-                total[fw] += t[(ew, fw)] / s_total[ew]
-
-    #--- Max
-    for ew in vocab_e:
-        for fw in vocab_f:
-            t[(ew, fw)] = count[(ew, fw)] / total[fw]
+        # E step
+        for e_word in sentence_e:
+            for f_word in sentence_f:
+                count[(e_word, f_word)] += t[(e_word, f_word)]  / s_total[e_word]
+                total[f_word] += t[(e_word, f_word)]  / s_total[e_word]
+    
+    # M step
+    for e_word in vocab_e:
+        for f_word in vocab_f:
+            try:
+                t[(e_word, f_word)] = count[(e_word, f_word)] / total[f_word]
+            except KeyError as e:
+                assert (e_word, f_word) not in count
+                pass
+            except Exception as e:
+                raise(e)
 
     return t
 
-def train(E, F, vocab_e, vocab_f, iters: int) -> Dict[Tuple, float]:
+def train(
+    E: language_corpus, F: language_corpus, 
+    vocab_e: Set[str], vocab_f: Set[str], 
+    iters: int
+    ) -> t_dtype:
+
     # initialize
     t = dict()
-    for ew in vocab_e:
-        for fw in vocab_f:
-            t[(ew, fw)] = 1/len(vocab_e)
+    for sentence_e, sentence_f in zip(E,F):
+        t.update({
+            (e_word, f_word): 1/len(vocab_e) for e_word in sentence_e 
+            for f_word in sentence_f
+        })
 
     for i in range(iters):
         print(f'iter: {i+1}')
@@ -88,10 +123,10 @@ def train(E, F, vocab_e, vocab_f, iters: int) -> Dict[Tuple, float]:
     return t
 
 def align(
-    prob:Dict[Tuple, float], 
-    source_sentences: List[List[str]], 
-    target_sentences: List[List[str]]
-    ) -> List[List[Tuple[int, int]]]:
+    prob: t_dtype, 
+    source_sentences: language_corpus, 
+    target_sentences: language_corpus
+    ) -> alignments_dtype:
 
     output = []
 
@@ -110,7 +145,7 @@ def align(
     return output
 
 
-def write_alignments(alignments: List[List[Tuple[int, int]]]):
+def write_alignments(alignments: alignments_dtype):
     stdout = ''
     for alignment in alignments:
         stdout += " ".join([f"{e[0]}-{e[1]}" for e in alignment])
@@ -136,7 +171,7 @@ if __name__ == "__main__":
     vocab_f = get_vocab(F)
     print(f'Vocab size: Eng: {len(vocab_e)}, Es: {len(vocab_f)}')
 
-    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=1)
+    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=3)
     print(prob)
     alignments = align(prob=prob, source_sentences=F, target_sentences=E)
     write_alignments(alignments=alignments)
