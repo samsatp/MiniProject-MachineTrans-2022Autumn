@@ -1,19 +1,19 @@
 from typing import Dict, Tuple, List, Set, NewType
-import os
+import os, json
 
 t_dtype = NewType('t_dtype', Dict[Tuple[str,str] , float])
 language_corpus = NewType('language_corpus', List[List[str]])
 alignments_dtype = NewType('alignments_dtype', List[List[Tuple[int, int]]])
 
 def read_data(
-    training: bool = True,
-    sentence_limit: int = None,
-    toy: bool = False
-    ) -> Tuple[List[List[str]]]:
+    training:       bool = True,
+    sentence_limit: int  = None,
+    toy:            bool = False
+    ) -> Tuple[language_corpus, language_corpus]:
 
     """
         This function read two files: target and source
-        and tokenize each sentence into list of words
+        Then tokenize each sentence into list of words
     """
 
     if toy:
@@ -36,7 +36,10 @@ def read_data(
     return eng, foreign
 
 
-def get_vocab(sentences: List[List[str]]) -> Set[str]:
+def get_vocab(sentences: language_corpus) -> Set[str]:
+    """
+        This function returns a set containing all uniques word in a given corpus
+    """
     vocab = set()
     for sentence in sentences:
         for word in sentence:
@@ -53,39 +56,31 @@ def train_iter(
         This function train one-epoch of EM
 
         ## parameters
-        - `E`, `F`: List[List[str]] :
-            For E, a list of all English sentences, each member is each sentence,
-            each member of each sentence is each token in that sentence. 
-            For F, the same of foreign sentences
+        - `E`, `F`, `vocab_e`, `vocab_f` : The same as the train function
 
-        - `vocab_e`, `vocab_f`: set[str] :
-            For vocab_e, a set of all unique vocab in English.
-            For vocab_f, the same of foreign language
-
-        - `t` : Dict[Tuple[str,str] , float]
+        - `t` : Dict[Tuple[str,str] , float] : 
             Our final Foreign-English dictionary
     """
     # initialize count and total
     count = dict()
-    for sentence_e, sentence_f in zip(E,F):
+    for e_sentence, f_sentence in zip(E,F):
         count.update({
-            (e_word, f_word): 0.0 for e_word in sentence_e 
-            for f_word in sentence_f
+            (e_word, f_word): 0.0 for e_word in e_sentence 
+            for f_word in f_sentence
         })
 
     total = {f_word: 0.0 for f_word in vocab_f}
 
     
-    for sentence_e, sentence_f in zip(E,F):
-
+    for e_sentence, f_sentence in zip(E,F):
         # normalization term
         s_total = dict()
-        for e_word in sentence_e:
-            s_total[e_word] = sum([t[(e_word, f_word)] for f_word in sentence_f])
+        for e_word in e_sentence:
+            s_total[e_word] = sum([t[(e_word, f_word)] for f_word in f_sentence])
 
         # E step
-        for e_word in sentence_e:
-            for f_word in sentence_f:
+        for e_word in e_sentence:
+            for f_word in f_sentence:
                 count[(e_word, f_word)] += t[(e_word, f_word)]  / s_total[e_word]
                 total[f_word] += t[(e_word, f_word)]  / s_total[e_word]
     
@@ -102,11 +97,42 @@ def train_iter(
 
     return t
 
+def write_prob(filepath, prob):
+    """
+        This function writes probability of translations into a file,
+        for checking how probability converges at each iteration
+    """
+    output = ''
+    for (ew, fw), p in prob.items():
+        output+=f'{ew},{fw},{p}\n'
+            
+    with open(filepath, 'w') as f:
+        f.write(output)
+
+
 def train(
     E: language_corpus, F: language_corpus, 
     vocab_e: Set[str], vocab_f: Set[str], 
     iters: int
     ) -> t_dtype:
+    """
+        This function do the whole training process
+        First, it initialize all the alignment weights with uniform weights
+        Then, it train on the given data for a number of iterations
+
+        ## Parameters
+        - `E`, `F`: List[List[str]] : 
+            For E, a list of all English sentences, each member is each sentence,
+            each member of each sentence is each token in that sentence. 
+            For F, the same of foreign sentences
+
+        - `vocab_e`, `vocab_f`: set[str] :
+            For vocab_e, a set of all unique vocab in English.
+            For vocab_f, the same of foreign language
+        
+        - `iters`: int :
+            The number of iterations to train EM
+    """
 
     # initialize
     t = dict()
@@ -119,27 +145,29 @@ def train(
     for i in range(iters):
         print(f'iter: {i+1}')
         t = train_iter(E, F, vocab_e, vocab_f, t)
+        write_prob(filepath=f'data/prob_{i}.csv', prob=t)
+        
 
     return t
 
 def align(
     prob: t_dtype, 
-    source_sentences: language_corpus, 
-    target_sentences: language_corpus
+    f_sentences: language_corpus, 
+    e_sentences: language_corpus
     ) -> alignments_dtype:
 
     output = []
 
-    for i, target_sentence in enumerate(target_sentences):
+    for i, e_sentence in enumerate(e_sentences):
         sentence_align = []
-        for k, ew in enumerate(target_sentence):
+        for ew_index, e_word in enumerate(e_sentence):
             max_prob = 0
-            max_prob_fw = None
-            for j, fw in enumerate(source_sentences[i]):
-                if prob[(ew, fw)] > max_prob:
-                    max_prob = prob[(ew, fw)]
-                    max_prob_fw = j
-            sentence_align.append((max_prob_fw,k))
+            max_prob_fw_index = None
+            for j, f_word in enumerate(f_sentences[i]):
+                if prob[(e_word, f_word)] > max_prob:
+                    max_prob = prob[(e_word, f_word)]
+                    max_prob_fw_index = j
+            sentence_align.append((max_prob_fw_index, ew_index))
         output.append(sentence_align)
             
     return output
@@ -171,8 +199,7 @@ if __name__ == "__main__":
     vocab_f = get_vocab(F)
     print(f'Vocab size: Eng: {len(vocab_e)}, Es: {len(vocab_f)}')
 
-    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=3)
-    print(prob)
-    alignments = align(prob=prob, source_sentences=F, target_sentences=E)
+    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=10)
+    alignments = align(prob=prob, f_sentences=F, e_sentences=E)
     write_alignments(alignments=alignments)
 
