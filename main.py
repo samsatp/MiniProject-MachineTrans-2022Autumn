@@ -22,7 +22,7 @@ def read_data(
         return eng, foreign
 
     en_data_path = os.path.join("data","training.en" if training else "test.en")
-    es_data_path = os.path.join("data","training.es" if training else "test.en")
+    es_data_path = os.path.join("data","training.es" if training else "test.es")
 
     with open(en_data_path, 'r') as f:
         eng = f.readlines()[:sentence_limit]
@@ -145,7 +145,7 @@ def train(
     for i in range(iters):
         print(f'iter: {i+1}')
         t = train_iter(E, F, vocab_e, vocab_f, t)
-        write_prob(filepath=f'data/prob_{i}.csv', prob=t)
+        write_prob(filepath=os.path.join('data',f'prob_{i}.csv'), prob=t)
         
 
     return t
@@ -164,42 +164,81 @@ def align(
             max_prob = 0
             max_prob_fw_index = None
             for j, f_word in enumerate(f_sentences[i]):
-                if prob[(e_word, f_word)] > max_prob:
-                    max_prob = prob[(e_word, f_word)]
-                    max_prob_fw_index = j
-            sentence_align.append((max_prob_fw_index, ew_index))
+                    try:
+                        if prob[(e_word, f_word)] > max_prob:
+                            max_prob = prob[(e_word, f_word)]
+                            max_prob_fw_index = j
+                    except KeyError as e:
+                        continue
+                    except Exception as e:
+                        raise(e)
+            sentence_align.append((max_prob_fw_index if max_prob_fw_index is not None else 999, ew_index))
         output.append(sentence_align)
             
     return output
 
 
-def write_alignments(alignments: alignments_dtype):
+def write_alignments(alignments: alignments_dtype) -> str:
     stdout = ''
     for alignment in alignments:
         stdout += " ".join([f"{e[0]}-{e[1]}" for e in alignment])
         stdout += "\n"
 
-    with open("data/res.txt", 'w') as f:
+    output_file = os.path.join("data","res.txt")
+    with open(output_file, 'w') as f:
         f.write(stdout)
 
-    pass
+    return output_file
 
-def evaluate():
-    pass
+def evaluate(output_file:str):
+    with open(output_file, 'r') as f:
+        pred = f.readlines()
+        pred = [sentence.split() for sentence in pred]
+
+    with open(os.path.join("data","test.align"), 'r') as f:
+        gold = f.readlines()
+        gold = [sentence.split() for sentence in gold]
+
+    n_predict = 0
+    n_gold = 0
+    n_recall = 0
+    n_precision = 0
+
+    for pred_alings, gold_aligns in zip(pred, gold):
+        n_gold += len(gold_aligns)
+        for gold_align in gold_aligns:
+            if gold_align in pred_alings:
+                n_recall += 1
+        n_predict += len(pred_alings)
+        for pred_align in pred_alings:
+            if pred_align in gold_aligns:
+                n_precision += 1
+
+    print(f'RECALL: {round(n_recall/n_gold, 3)}')
+    print(f'PRECISION: {round(n_precision/n_predict, 3)}')
 
 def write_translations():
     pass
 
 
 if __name__ == "__main__":
-    E, F = read_data(toy=True)
+
+    # Train
+    print("TRAINING...")
+    E, F = read_data(training=True, sentence_limit=10000)
     print(f'Data size: Eng: {len(E)}, Es: {len(F)}')
 
     vocab_e = get_vocab(E)
     vocab_f = get_vocab(F)
     print(f'Vocab size: Eng: {len(vocab_e)}, Es: {len(vocab_f)}')
 
-    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=10)
-    alignments = align(prob=prob, f_sentences=F, e_sentences=E)
-    write_alignments(alignments=alignments)
+    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=4)
+
+    # Test
+    print("\n\n\nTESTING...")
+    E_test, F_test = read_data(training=False)
+    alignments = align(prob=prob, f_sentences=F_test, e_sentences=E_test)
+    output_file = write_alignments(alignments=alignments)
+
+    evaluate(output_file)
 
