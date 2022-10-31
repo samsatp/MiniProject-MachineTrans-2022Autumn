@@ -25,10 +25,10 @@ def read_data(
     es_data_path = os.path.join("data","training.es" if training else "test.es")
 
     with open(en_data_path, 'r') as f:
-        eng = f.readlines()[:sentence_limit]
+        eng = f.readlines()
         eng = [e.strip().split() for e in eng]
     with open(es_data_path, 'r') as f:
-        foreign = f.readlines()[:sentence_limit]
+        foreign = f.readlines()
         foreign = [e.strip().split() for e in foreign]
         
     if sentence_limit:
@@ -62,17 +62,17 @@ def train_iter(
             Our final Foreign-English dictionary
     """
     # initialize count and total
+    print('\t\tinitializing...')
     count = dict()
     for e_sentence, f_sentence in zip(E,F):
         count.update({
             (e_word, f_word): 0.0 for e_word in e_sentence 
             for f_word in f_sentence
         })
-
     total = {f_word: 0.0 for f_word in vocab_f}
 
-    
-    for e_sentence, f_sentence in zip(E,F):
+    print('\t\tDoing Expectation step...')
+    for i, (e_sentence, f_sentence) in enumerate(zip(E,F)):
         # normalization term
         s_total = dict()
         for e_word in e_sentence:
@@ -83,37 +83,25 @@ def train_iter(
             for f_word in f_sentence:
                 count[(e_word, f_word)] += t[(e_word, f_word)]  / s_total[e_word]
                 total[f_word] += t[(e_word, f_word)]  / s_total[e_word]
-    
+
     # M step
+    print('\t\tDoing Maximizing step...')
+    i = 0
     for e_word in vocab_e:
         for f_word in vocab_f:
-            try:
+            i += 1
+            if (e_word, f_word) in count.keys():
                 t[(e_word, f_word)] = count[(e_word, f_word)] / total[f_word]
-            except KeyError as e:
-                assert (e_word, f_word) not in count
-                pass
-            except Exception as e:
-                raise(e)
-
-    return t
-
-def write_prob(filepath, prob):
-    """
-        This function writes probability of translations into a file,
-        for checking how probability converges at each iteration
-    """
-    output = ''
-    for (ew, fw), p in prob.items():
-        output+=f'{ew},{fw},{p}\n'
             
-    with open(filepath, 'w') as f:
-        f.write(output)
+    print()
+    return t
 
 
 def train(
     E: language_corpus, F: language_corpus, 
     vocab_e: Set[str], vocab_f: Set[str], 
-    iters: int
+    iters: int,
+    write_prob_at_each_iter: bool = False
     ) -> t_dtype:
     """
         This function do the whole training process
@@ -132,6 +120,11 @@ def train(
         
         - `iters`: int :
             The number of iterations to train EM
+
+        - `write_prob_at_each_iter`: bool :
+            If true, at the end of each epoch, write a file 
+            containing the probabilities t(e|f). The purpose is 
+            to see behaviour of t(e|f) for debugging.
     """
 
     # initialize
@@ -143,12 +136,28 @@ def train(
         })
 
     for i in range(iters):
-        print(f'iter: {i+1}')
+        print(f'\n\t-epoch: {i+1}')
         t = train_iter(E, F, vocab_e, vocab_f, t)
-        write_prob(filepath=os.path.join('data',f'prob_{i}.csv'), prob=t)
-        
+
+        if write_prob_at_each_iter:
+            write_prob(filepath=os.path.join('data',f'prob_{i}.csv'), prob=t)
 
     return t
+
+
+def write_prob(filepath, prob):
+    """
+        This function writes probability of translations into a file,
+        for checking how probability converges at each iteration
+    """
+    print('writing prob...')
+    output = ''
+    for (ew, fw), p in prob.items():
+        output+=f'{ew},{fw},{p}\n'
+            
+    with open(filepath, 'w') as f:
+        f.write(output)
+
 
 def align(
     prob: t_dtype, 
@@ -190,6 +199,7 @@ def write_alignments(alignments: alignments_dtype) -> str:
 
     return output_file
 
+
 def evaluate(output_file:str):
     with open(output_file, 'r') as f:
         pred = f.readlines()
@@ -214,31 +224,77 @@ def evaluate(output_file:str):
             if pred_align in gold_aligns:
                 n_precision += 1
 
-    print(f'RECALL: {round(n_recall/n_gold, 3)}')
-    print(f'PRECISION: {round(n_precision/n_predict, 3)}')
+    precision = round(n_precision/n_predict, 3)
+    recall = round(n_recall/n_gold, 3)
+    f_1 = 2*((precision*recall)/(precision+recall))
 
-def write_translations():
-    pass
+    print(f'\t\tRECALL: {recall}')
+    print(f'\t\tPRECISION: {precision}')
+    print(f'\t\tF1 score: {f_1}')
+
+
+def get_dictionary(prob: t_dtype):
+    dictionary = dict()
+    scores = dict()
+    
+    for (e_word, f_word), p in prob.items():
+        if f_word not in dictionary:
+            dictionary[f_word] = e_word
+            scores[f_word] = p
+        else:
+            if scores[f_word] < p:
+                dictionary[f_word] = e_word
+                scores[f_word] = p
+    
+    with open(os.path.join("data", "dictionary.json"), 'w') as f:
+        json.dump(dictionary, f)
+        print("\tWrite dictionary...")
+    return dictionary
+
+
+def write_translations(dictionary: Dict[str, str], source_sentences: language_corpus):
+    output = ""
+    for sentence in source_sentences:
+        for f_word in sentence:
+            if f_word in dictionary:
+                e_word = dictionary[f_word]
+            else:
+                # This is when the foreign word 
+                # doesn't appear in our training data
+                e_word = '<UNK>'
+            output += e_word
+            output += " "
+        output += "\n"
+
+    with open(os.path.join("data", "translations.txt"), "w") as f:
+        f.write(output)    
+        print("\n\nDone!")
 
 
 if __name__ == "__main__":
 
     # Train
     print("TRAINING...")
-    E, F = read_data(training=True, sentence_limit=10000)
+    E, F = read_data(training=True)
     print(f'Data size: Eng: {len(E)}, Es: {len(F)}')
 
     vocab_e = get_vocab(E)
     vocab_f = get_vocab(F)
     print(f'Vocab size: Eng: {len(vocab_e)}, Es: {len(vocab_f)}')
 
-    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=4)
+    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=3, write_prob_at_each_iter=False)
+    dictionary = get_dictionary(prob=prob)
 
     # Test
-    print("\n\n\nTESTING...")
+    print("\n\nTESTING...")
     E_test, F_test = read_data(training=False)
+
+    print("\tDoing alignments...")
     alignments = align(prob=prob, f_sentences=F_test, e_sentences=E_test)
     output_file = write_alignments(alignments=alignments)
 
+    print("\tDoing evaluation...")
     evaluate(output_file)
 
+    print("\tDoing translation...")
+    write_translations(dictionary=dictionary, source_sentences=E_test)
