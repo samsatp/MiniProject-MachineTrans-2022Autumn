@@ -224,13 +224,13 @@ def evaluate(output_file:str):
             if pred_align in gold_aligns:
                 n_precision += 1
 
-    precision = round(n_precision/n_predict, 3)
-    recall = round(n_recall/n_gold, 3)
-    f_1 = 2*((precision*recall)/(precision+recall))
+    precision = round(n_precision/n_predict, 4)
+    recall = round(n_recall/n_gold, 4)
+    f_1 = round(2*((precision*recall)/(precision+recall)), 4)
 
-    print(f'\t\tRECALL: {recall}')
-    print(f'\t\tPRECISION: {precision}')
-    print(f'\t\tF1 score: {f_1}')
+    print(f'\t\tRECALL: {recall*100}%')
+    print(f'\t\tPRECISION: {precision*100}%')
+    print(f'\t\tF1 score: {f_1*100}%')
 
 
 def get_dictionary(prob: t_dtype):
@@ -272,17 +272,25 @@ def write_translations(dictionary: Dict[str, str], source_sentences: language_co
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--toy', type=bool, nargs='?', const=1, default=False, help="set to True to use book example")
+    parser.add_argument('--limit', type=int, nargs='?', const=1, default=None, help="limit the number of sentences used to train model")
+    parser.add_argument('--epochs', type=int, nargs='?', const=1, default=3, help="specify how many epochs")
+    parser.add_argument('--writeP', type=bool, nargs='?', const=1, default=False, help="set to True to write t(e|f) at each epoch")
+    args = parser.parse_args()
 
     # Train
     print("TRAINING...")
-    E, F = read_data(training=True)
+    E, F = read_data(training=True, sentence_limit=args.limit, toy=args.toy)
     print(f'Data size: Eng: {len(E)}, Es: {len(F)}')
 
     vocab_e = get_vocab(E)
     vocab_f = get_vocab(F)
     print(f'Vocab size: Eng: {len(vocab_e)}, Es: {len(vocab_f)}')
 
-    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=3, write_prob_at_each_iter=False)
+    print(f"running {args.epochs} epochs...")
+    prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=args.epochs, write_prob_at_each_iter=args.writeP)
     dictionary = get_dictionary(prob=prob)
 
     # Test
