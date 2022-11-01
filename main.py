@@ -1,5 +1,5 @@
 from typing import Dict, Tuple, List, Set, NewType
-import os, json
+import os, json, argparse
 
 t_dtype = NewType('t_dtype', Dict[Tuple[str,str] , float])
 language_corpus = NewType('language_corpus', List[List[str]])
@@ -14,6 +14,17 @@ def read_data(
     """
         This function read two files: target and source
         Then tokenize each sentence into list of words
+
+        ## Parameters
+        1. `training`: bool, default = True : 
+            If True, read training datasets. If False, read testing datasets.
+
+        2. `sentence_limit`: int, default = None : 
+            How many sentences to include in training process.
+            If None, use all sentences.
+
+        3. `toy`: bool, default = False : 
+            If True use toy dataset(book example)
     """
 
     if toy:
@@ -121,7 +132,7 @@ def train(
         - `iters`: int :
             The number of iterations to train EM
 
-        - `write_prob_at_each_iter`: bool :
+        - `write_prob_at_each_iter`: bool, default = False :
             If true, at the end of each epoch, write a file 
             containing the probabilities t(e|f). The purpose is 
             to see behaviour of t(e|f) for debugging.
@@ -140,15 +151,15 @@ def train(
         t = train_iter(E, F, vocab_e, vocab_f, t)
 
         if write_prob_at_each_iter:
-            write_prob(filepath=os.path.join('data',f'prob_{i}.csv'), prob=t)
+            write_prob(filepath=os.path.join('data',f'prob_{i+1}.csv'), prob=t)
 
     return t
 
 
 def write_prob(filepath, prob):
     """
-        This function writes probability of translations into a file,
-        for checking how probability converges at each iteration
+        This function writes probabilities t(e|f) into a file,
+        for checking how probabilities converges at each iteration
     """
     print('writing prob...')
     output = ''
@@ -164,6 +175,11 @@ def align(
     f_sentences: language_corpus, 
     e_sentences: language_corpus
     ) -> alignments_dtype:
+    """
+        This function creates alignments. Each target word needs to
+        align to some word in a source sentence. Alignment is done by
+        argmax decoding.
+    """
 
     output = []
 
@@ -188,12 +204,15 @@ def align(
 
 
 def write_alignments(alignments: alignments_dtype) -> str:
+    """
+        This funtion writes alignment results to a file
+    """
     stdout = ''
     for alignment in alignments:
         stdout += " ".join([f"{e[0]}-{e[1]}" for e in alignment])
         stdout += "\n"
 
-    output_file = os.path.join("data","res.txt")
+    output_file = os.path.join("data","results.align")
     with open(output_file, 'w') as f:
         f.write(stdout)
 
@@ -201,6 +220,11 @@ def write_alignments(alignments: alignments_dtype) -> str:
 
 
 def evaluate(output_file:str):
+    """
+        This function tests the model with testing dataset
+        by calculating precision, recall, f1-score
+    """
+
     with open(output_file, 'r') as f:
         pred = f.readlines()
         pred = [sentence.split() for sentence in pred]
@@ -234,6 +258,9 @@ def evaluate(output_file:str):
 
 
 def get_dictionary(prob: t_dtype):
+    """
+        This function summarizes t(e|f) into a source-target dictionary
+    """
     dictionary = dict()
     scores = dict()
     
@@ -253,6 +280,12 @@ def get_dictionary(prob: t_dtype):
 
 
 def write_translations(dictionary: Dict[str, str], source_sentences: language_corpus):
+    """
+        This function use source-target dictionary to
+        translate source sentences into target sentences
+        and write the results to a file
+    """
+
     output = ""
     for sentence in source_sentences:
         for f_word in sentence:
@@ -272,7 +305,19 @@ def write_translations(dictionary: Dict[str, str], source_sentences: language_co
 
 
 if __name__ == "__main__":
-    import argparse
+    print("="*30)
+    print("""
+    README
+    - To check t(e|f) of the Book example at each epoch, set param: `--toy=True --writeP=True`
+        Then this program will write files: data/prob_{i}.csv which contains t(e|f) at the end of i-th epoch.
+        Note that i starts from 1, i.e i=1,2,3,...
+
+    - data/results.align is a resulting file from write_alignments() function
+
+    - data/translations.txt is a resulting file from write_translations() function
+    """)
+    print("="*30)
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--toy', type=bool, nargs='?', const=1, default=False, help="set to True to use book example")
     parser.add_argument('--limit', type=int, nargs='?', const=1, default=None, help="limit the number of sentences used to train model")
@@ -294,15 +339,16 @@ if __name__ == "__main__":
     dictionary = get_dictionary(prob=prob)
 
     # Test
-    print("\n\nTESTING...")
-    E_test, F_test = read_data(training=False)
+    if not args.toy:
+        print("\n\nTESTING...")
+        E_test, F_test = read_data(training=False)
 
-    print("\tDoing alignments...")
-    alignments = align(prob=prob, f_sentences=F_test, e_sentences=E_test)
-    output_file = write_alignments(alignments=alignments)
+        print("\tDoing alignments...")
+        alignments = align(prob=prob, f_sentences=F_test, e_sentences=E_test)
+        output_file = write_alignments(alignments=alignments)
 
-    print("\tDoing evaluation...")
-    evaluate(output_file)
+        print("\tDoing evaluation...")
+        evaluate(output_file)
 
-    print("\tDoing translation...")
-    write_translations(dictionary=dictionary, source_sentences=E_test)
+        print("\tDoing translation...")
+        write_translations(dictionary=dictionary, source_sentences=E_test)
