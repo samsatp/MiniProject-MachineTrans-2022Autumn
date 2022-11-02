@@ -276,10 +276,13 @@ def get_dictionary(prob: t_dtype):
     with open(os.path.join("data", "dictionary.json"), 'w') as f:
         json.dump(dictionary, f)
         print("\tWrite dictionary...")
-    return dictionary
+    return dictionary, scores
 
 
-def write_translations(dictionary: Dict[str, str], source_sentences: language_corpus):
+def write_translations(
+    dictionary: Dict[str, str], 
+    source_sentences: language_corpus,
+    prob: t_dtype):
     """
         This function use source-target dictionary to
         translate source sentences into target sentences
@@ -288,20 +291,23 @@ def write_translations(dictionary: Dict[str, str], source_sentences: language_co
 
     output = ""
     for sentence in source_sentences:
+        output += " ".join(sentence) + " "
+        translation_prob = 1
         for f_word in sentence:
             if f_word in dictionary:
                 e_word = dictionary[f_word]
+                translation_prob *= (prob[(e_word, f_word)] / sum([prob[(e_word, fw)]  for fw in sentence if (e_word, fw) in prob]))
             else:
                 # This is when the foreign word 
                 # doesn't appear in our training data
                 e_word = '<UNK>'
             output += e_word
             output += " "
-        output += "\n"
+        output += str(translation_prob) + "\n"
 
     with open(os.path.join("data", "translations.txt"), "w") as f:
         f.write(output)    
-        print("\n\nDone!")
+        print("\nDone!")
 
 
 if __name__ == "__main__":
@@ -336,7 +342,7 @@ if __name__ == "__main__":
 
     print(f"running {args.epochs} epochs...")
     prob = train(E=E, F=F, vocab_e=vocab_e, vocab_f=vocab_f, iters=args.epochs, write_prob_at_each_iter=args.writeP)
-    dictionary = get_dictionary(prob=prob)
+    dictionary, scores = get_dictionary(prob=prob)
 
     # Test
     if not args.toy:
@@ -351,4 +357,4 @@ if __name__ == "__main__":
         evaluate(output_file)
 
         print("\tDoing translation...")
-        write_translations(dictionary=dictionary, source_sentences=E_test)
+        write_translations(dictionary=dictionary, source_sentences=F_test, prob=prob)
