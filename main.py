@@ -189,14 +189,14 @@ def align(
             max_prob = 0
             max_prob_fw_index = None
             for j, f_word in enumerate(f_sentences[i]):
-                    try:
-                        if prob[(e_word, f_word)] > max_prob:
-                            max_prob = prob[(e_word, f_word)]
-                            max_prob_fw_index = j
-                    except KeyError as e:
-                        continue
-                    except Exception as e:
-                        raise(e)
+                try:
+                    if prob[(e_word, f_word)] > max_prob:
+                        max_prob = prob[(e_word, f_word)]
+                        max_prob_fw_index = j
+                except KeyError as e:
+                    continue
+                except Exception as e:
+                    raise(e)
             sentence_align.append((max_prob_fw_index if max_prob_fw_index is not None else 999, ew_index))
         output.append(sentence_align)
             
